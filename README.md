@@ -214,13 +214,186 @@ openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
 The `.p8` file is your private key (keep it secret). The `.pub` file is assigned
 to your Snowflake user.
 
+<details> <summary><strong>Windows setup</strong></summary>
+
+If you are using Windows, Scoop can be used to install the required command-line tools. Scoop is a command-line package manager for Windows that makes it easy to install developer tools without manually downloading installers or configuring PATH.
+
+#### Install Scoop
+
+Open PowerShell and run:
+```bash
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+irm get.scoop.sh | iex
+```
+
+Verify the installation:
+```bash
+scoop --version
+```
+
+#### Install Make
+
+Install make using Scoop:
+```bash
+scoop install make
+```
+Verify:
+```bash
+make --version
+```
+#### Install OpenSSL
+
+Install OpenSSL using Scoop:
+```bash
+scoop install openssl
+```
+Verify:
+```bash
+openssl version
+```
+Then run the setup 1, 2
+
+</details>
+
+
 ### 3. Assign the public key to your Snowflake user
 
-In Snowflake (Snowsight → Worksheets), run:
+Snowflake needs your **public RSA key** so that it can recognize your computer when the pipeline connects using key-pair authentication.
+
+You should have already generated a file named:
+
+```text
+rsa_key.pub
+```
+
+This file contains your public key.
+
+#### 3.1 Open the public key file
+
+On Windows, open PowerShell in your project directory and run:
+
+```powershell
+Get-Content .\rsa_key.pub
+```
+
+You should see something similar to:
+
+```text
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...
+...more characters...
+-----END PUBLIC KEY-----
+```
+
+**Copy everything**, including:
+
+```text
+-----BEGIN PUBLIC KEY-----
+```
+
+and
+
+```text
+-----END PUBLIC KEY-----
+```
+
+> **Important:** Only copy the contents of `rsa_key.pub`. Do **not** copy `rsa_key.p8` or your private key. The private key must remain on your computer and should never be uploaded to Snowflake.
+
+#### 3.2 Open Snowflake Snowsight
+
+1. Log in to your Snowflake account.
+2. Create any SQL file ready to compile SQL command.
+3. In the left sidebar, select **+**.
+4. Create a new SQL file.
+
+#### 3.3 Find your Snowflake username
+
+You need to replace `<your_user>` with your actual Snowflake username.
+
+You can check your current username by running:
 
 ```sql
-ALTER USER <your_user> SET RSA_PUBLIC_KEY = '<paste the full contents of rsa_key.pub>';
+SELECT CURRENT_USER();
 ```
+
+For example, Snowflake might return:
+
+```text
+DANGNHA
+```
+
+#### 3.4 Assign the public key
+
+Now run the following SQL:
+
+```sql
+ALTER USER <your_user>
+SET RSA_PUBLIC_KEY = '<paste the contents of rsa_key.pub here>';
+```
+
+For example, if your Snowflake username is `DANGNHA`, the command would look like:
+
+```sql
+ALTER USER DANGNHA
+SET RSA_PUBLIC_KEY = '-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...
+...<YOUR_KEY>...
+-----END PUBLIC KEY-----';
+```
+
+Replace the example key above with the **actual contents of your `rsa_key.pub` file**.
+
+#### 3.5 Verify that the key was assigned
+
+After running the `ALTER USER` command, verify the configuration with:
+
+```sql
+DESC USER <your_user>;
+```
+
+For example:
+
+```sql
+DESC USER DANGNHA;
+```
+
+Look for the property:
+
+```text
+RSA_PUBLIC_KEY
+```
+
+If it contains your public key, the configuration was successful.
+
+### What you are doing
+
+The authentication flow is:
+
+```text
+Your computer
+    │
+    │ rsa_key.p8 (PRIVATE KEY)
+    │
+    │ signs authentication request
+    ▼
+Snowflake
+    │
+    │ RSA_PUBLIC_KEY
+    │
+    │ verifies the signature
+    ▼
+Authenticated ✓
+```
+
+The important distinction is:
+
+| File          | Purpose                                    | Where it stays                |
+| ------------- | ------------------------------------------ | ----------------------------- |
+| `rsa_key.p8`  | Private key used by your pipeline          | **Your computer only**        |
+| `rsa_key.pub` | Public key used by Snowflake to verify you | **Snowflake + your computer** |
+
+**Never commit `rsa_key.p8` to GitHub.** Add it to `.gitignore` if it is not already there.
+
 
 ### 4. Configure the project
 
@@ -232,7 +405,7 @@ Edit `config/config.yaml` with your values:
 
 ```yaml
 snowflake:
-  account: "xy12345.ap-southeast-2"   # your account locator
+  account: "xy12345-myaccount"   # your account identifier
   user: "your_user"
   role: "SYSADMIN"
   warehouse: "AQ_WH"
@@ -240,6 +413,8 @@ snowflake:
   private_key_path: "~/.snowflake/rsa_key.p8"
   private_key_passphrase: ""
 ```
+
+*You can find welcome email to get Dedicated Login URL, the id asadsads-as23234 is your account identifier*:
 
 ### 5. Deploy the Snowflake objects
 
@@ -252,6 +427,10 @@ make deploy
 - the `AQ_WH` warehouse and `AQ_BUDGET_MONITOR` resource monitor
 - the `AQ_WAREHOUSE` database and its four schemas
 - file formats, stages, tables, streams, stored procedures, and the task DAG
+
+> `sql/07_snowflake_features_demo.sql` is **not** part of deployment — it's an
+> interactive demo that you run manually in Snowsight after data is loaded
+> (its Time Travel query needs existing table history).
 
 > **Important:** `sql/00_account_setup.sql` must run as `ACCOUNTADMIN`. If your
 > configured role is not `ACCOUNTADMIN`, run file `00` manually first in
@@ -310,20 +489,22 @@ After Bronze data exists, you can hand scheduling to Snowflake itself. Resume th
 task DAG and Streams + Tasks will keep Silver → DQ → Gold fresh on their own:
 
 ```sql
-ALTER TASK SILVER.LOAD_SILVER_TASK RESUME;
+ALTER TASK CONTROL.LOAD_SILVER_TASK RESUME;
 ALTER TASK CONTROL.RUN_DQ_TASK RESUME;
-ALTER TASK GOLD.LOAD_GOLD_TASK RESUME;
+ALTER TASK CONTROL.LOAD_GOLD_TASK RESUME;
 ```
 
 The DAG:
 
 ```
-LOAD_SILVER_TASK  →  RUN_DQ_TASK  →  LOAD_GOLD_TASK
-     (streams)          (gate)          (gold)
+CONTROL.LOAD_SILVER_TASK  →  CONTROL.RUN_DQ_TASK  →  CONTROL.LOAD_GOLD_TASK
+        (streams)                 (gate)                    (gold)
 ```
 
 `LOAD_SILVER_TASK` only runs when a stream reports new Bronze rows; the `AFTER`
-dependencies guarantee correct ordering with no external scheduler.
+dependencies guarantee correct ordering with no external scheduler. All tasks
+live in the `CONTROL` schema because Snowflake requires a single `AFTER` chain
+to be in the same schema.
 
 ---
 
@@ -341,9 +522,9 @@ dependencies guarantee correct ordering with no external scheduler.
 | `freshness` | at least one row ingested within 48h |
 
 Each check writes a row to `CONTROL.DQ_RESULTS`. If any fail, the procedure
-`RAISE`s — which fails `RUN_DQ_TASK` and prevents `LOAD_GOLD_TASK` from running.
-This is the Snowflake-native replacement for the AWS "stop the pipeline" SNS
-behavior.
+`RAISE`s — which fails `CONTROL.RUN_DQ_TASK` and prevents `CONTROL.LOAD_GOLD_TASK`
+from running. This is the Snowflake-native replacement for the AWS "stop the
+pipeline" SNS behavior.
 
 ---
 
@@ -456,9 +637,9 @@ SHOW WAREHOUSES LIKE 'AQ_WH';
 If you enabled the Snowflake Task DAG, suspend the tasks after testing:
 
 ```sql
-ALTER TASK GOLD.LOAD_GOLD_TASK SUSPEND;
+ALTER TASK CONTROL.LOAD_GOLD_TASK SUSPEND;
 ALTER TASK CONTROL.RUN_DQ_TASK SUSPEND;
-ALTER TASK SILVER.LOAD_SILVER_TASK SUSPEND;
+ALTER TASK CONTROL.LOAD_SILVER_TASK SUSPEND;
 ```
 
 This prevents the scheduled pipeline from continuing to execute.
@@ -479,9 +660,9 @@ DROP DATABASE IF EXISTS AQ_WAREHOUSE;
 For a temporary test, the minimum recommended cleanup is:
 
 ```sql
-ALTER TASK GOLD.LOAD_GOLD_TASK SUSPEND;
+ALTER TASK CONTROL.LOAD_GOLD_TASK SUSPEND;
 ALTER TASK CONTROL.RUN_DQ_TASK SUSPEND;
-ALTER TASK SILVER.LOAD_SILVER_TASK SUSPEND;
+ALTER TASK CONTROL.LOAD_SILVER_TASK SUSPEND;
 
 ALTER WAREHOUSE AQ_WH SUSPEND;
 ```

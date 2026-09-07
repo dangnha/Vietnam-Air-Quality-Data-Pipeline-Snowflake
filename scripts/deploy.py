@@ -17,9 +17,14 @@ from python.config import PROJECT_ROOT, snowflake_connection_params
 
 SQL_DIR = PROJECT_ROOT / "sql"
 
+# 07 is an interactive demo (Time Travel / Clone / clustering). It must be run
+# manually AFTER data exists, not during deployment — otherwise its Time Travel
+# query fails because the tables were just created.
+SKIP_FILES = {"07_snowflake_features_demo.sql"}
+
 
 def _read_sql_files() -> list[Path]:
-    return sorted(SQL_DIR.glob("*.sql"))
+    return [p for p in sorted(SQL_DIR.glob("*.sql")) if p.name not in SKIP_FILES]
 
 
 def main() -> int:
@@ -33,14 +38,18 @@ def main() -> int:
         for path in files:
             print(f"[deploy] executing {path.name}")
             # execute_stream handles semicolons AND dollar-quoted procedure bodies.
+            # remove_comments=True avoids "Empty SQL statement" errors when a file
+            # ends with comment lines (e.g. sql/02_file_formats_stages.sql).
             with path.open("r", encoding="utf-8") as fh:
-                for cursor in conn.execute_stream(fh):
+                for cursor in conn.execute_stream(fh, remove_comments=True):
                     for _row in cursor:
                         pass
     finally:
         conn.close()
 
     print("[deploy] all SQL objects applied")
+    if SKIP_FILES:
+        print("[deploy] skipped interactive demo(s): " + ", ".join(sorted(SKIP_FILES)))
     return 0
 
 

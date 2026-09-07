@@ -10,7 +10,7 @@ snowflake:
   #   openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
   # then assign the public key to your Snowflake user:
   #   ALTER USER <user> SET RSA_PUBLIC_KEY = '<contents of rsa_key.pub>';
-  private_key_path: "~/.snowflake/rsa_key.p8"
+  private_key_path: ".snowflake/rsa_key.p8"
   private_key_passphrase: ""            # leave empty if the key is not encrypted
 
 waqi:

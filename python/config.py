@@ -82,10 +82,10 @@ def snowflake_enabled() -> bool:
     )
 
 
-def snowflake_connection_params() -> dict[str, str]:
+def snowflake_connection_params() -> dict[str, Any]:
     """Parameters for snowflake.connector.connect(**params).
 
-    Uses RSA key-pair auth via the cryptography library (no password stored).
+    Uses RSA key-pair authentication via the cryptography library.
     """
     from cryptography.hazmat.primitives import serialization
 
@@ -93,25 +93,23 @@ def snowflake_connection_params() -> dict[str, str]:
     key_path = private_key_path()
     key_data = key_path.read_bytes()
 
-    try:
-        p_key = serialization.load_pem_private_key(key_data, password=None)
-    except TypeError:
-        passphrase = cfg.get("private_key_passphrase") or None
-        p_key = serialization.load_pem_private_key(
-            key_data,
-            password=passphrase.encode() if passphrase else None,
-        )
+    passphrase = cfg.get("private_key_passphrase") or None
 
-    private_key_pem = p_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
+    p_key = serialization.load_pem_private_key(
+        key_data,
+        password=passphrase.encode() if passphrase else None,
+    )
+
+    private_key_der = p_key.private_bytes(
+        encoding=serialization.Encoding.DER,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
-    ).decode("utf-8")
+    )
 
     return {
         "account": cfg.get("account"),
         "user": cfg.get("user"),
-        "private_key": private_key_pem,
+        "private_key": private_key_der,
         "role": cfg.get("role", "SYSADMIN"),
         "warehouse": cfg.get("warehouse", "AQ_WH"),
         "database": cfg.get("database", "AQ_WAREHOUSE"),

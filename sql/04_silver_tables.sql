@@ -59,6 +59,6 @@ COMMENT = 'Silver: one row per station measurement (star-schema fact)';
 -- ----------------------------------------------------------------------------
 -- The dimension is populated by:
 --   * python/orchestrate/native_pipeline.py  -> CALL SILVER.LOAD_FROM_BRONZE()
---   * the Streams/Tasks ELT path             -> SILVER.LOAD_SILVER_TASK
+--   * the Streams/Tasks ELT path             -> CONTROL.LOAD_SILVER_TASK
 -- Both use the same stored procedure, so the two engines stay in lock-step.
 -- ----------------------------------------------------------------------------
