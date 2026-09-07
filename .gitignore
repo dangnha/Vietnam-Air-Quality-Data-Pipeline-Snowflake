@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local configuration (contains credentials / key paths)
+config/config.yaml
+
+# Generated & runtime data (recreate with `make seed`)
+data/raw/
+data/output/
+data/sample/
+
+# Internal tooling / documentation kept local
+.commandcode/
+docs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp

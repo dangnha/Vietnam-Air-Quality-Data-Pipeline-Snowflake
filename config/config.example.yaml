@@ -1,0 +1,35 @@
+snowflake:
+  account: "<account_locator>"          # e.g. xy12345.ap-southeast-2
+  user: "<user>"
+  role: "SYSADMIN"
+  warehouse: "AQ_WH"
+  database: "AQ_WAREHOUSE"
+  schema: "CONTROL"
+  # RSA key-pair auth (recommended). Generate a key pair with:
+  #   openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key.p8 -nocrypt
+  #   openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
+  # then assign the public key to your Snowflake user:
+  #   ALTER USER <user> SET RSA_PUBLIC_KEY = '<contents of rsa_key.pub>';
+  private_key_path: "~/.snowflake/rsa_key.p8"
+  private_key_passphrase: ""            # leave empty if the key is not encrypted
+
+waqi:
+  token: ""                            # optional, https://aqicn.org/api/
+  cities:
+    - "ha-noi"
+    - "ho-chi-minh-city"
+    - "da-nang"
+    - "gia-lai"
+    - "cao-bang"
+  schedule: "08:00,14:00,20:00"        # informational only
+
+paths:
+  raw_dir: "data/raw"
+  sample_dir: "data/sample"
+  kaggle_csv: "data/sample/historical_air_quality_2021_en.csv"
+
+quality:
+  min_row_count: 10
+  max_null_percent: 5.0
+  max_aqi: 500
+  min_aqi: 0

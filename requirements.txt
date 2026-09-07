@@ -1,0 +1,15 @@
+# Snowpark Python API (DataFrame + session) for the load path
+snowflake-snowpark-python>=1.11,<2.0
+
+# Native connector (used by scripts/deploy.py + key-pair auth)
+snowflake-connector-python[pandas]>=3.5,<4.0
+
+# RSA key-pair authentication support
+cryptography>=41.0
+
+# Configuration + HTTP
+PyYAML>=6.0
+requests>=2.31
+
+# Testing
+pytest>=7.4
