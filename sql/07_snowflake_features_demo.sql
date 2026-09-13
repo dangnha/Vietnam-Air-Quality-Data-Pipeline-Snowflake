@@ -30,6 +30,23 @@ FROM BRONZE.API_RAW,
 LIMIT 10;
 
 -- ----------------------------------------------------------------------------
+-- 1b. STAR SCHEMA JOIN: the Silver layer is now a full Kimball star, so the
+--     same fact can be sliced by calendar, time-of-day, and city attributes
+--     with a single join chain. Compare this to repeating date logic per query.
+-- ----------------------------------------------------------------------------
+SELECT
+    c.city_name,
+    d.season,
+    t.time_of_day,
+    ROUND(AVG(f.aqi), 1) AS avg_aqi
+FROM SILVER.FACT_AQI f
+JOIN SILVER.DIM_CITY c  ON c.city_key = f.city_key
+JOIN SILVER.DIM_DATE d  ON d.date_key = f.date_key
+JOIN SILVER.DIM_TIME t  ON t.time_key = f.time_key
+GROUP BY c.city_name, d.season, t.time_of_day
+ORDER BY c.city_name, d.season, t.time_of_day;
+
+-- ----------------------------------------------------------------------------
 -- 2. TIME TRAVEL: rewind a table to any point in the last 90 days (Enterprise).
 --    "What did Silver look like before this morning's bad batch?"
 -- ----------------------------------------------------------------------------
@@ -53,7 +70,7 @@ CREATE OR REPLACE DATABASE AQ_WAREHOUSE_DEV CLONE AQ_WAREHOUSE;
 -- 4. MICRO-PARTITIONS: inspect how Snowflake organizes data automatically.
 --    (Contrast: manual S3 `year=2026/month=04/` folder partitions.)
 -- ----------------------------------------------------------------------------
-SELECT SYSTEM$CLUSTERING_INFORMATION('SILVER.FACT_AQI', '(queried_city, year, month, measured_at)');
+SELECT SYSTEM$CLUSTERING_INFORMATION('SILVER.FACT_AQI', '(city_key, date_key)');
 
 -- ----------------------------------------------------------------------------
 -- 5. ZERO-MANAGEMENT SCALE: spin up different-sized virtual warehouses on demand.

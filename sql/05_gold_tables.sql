@@ -1,12 +1,13 @@
 -- ============================================================================
--- 05. Gold Layer (analytics-ready)
+-- 05. Gold Layer (analytics-ready marts)
 --
--- GOLD = business aggregates. Each table answers one specific question and is
--- safe to expose to BI tools (Athena/QuickSight in AWS; any SQL BI on Snowflake).
+-- GOLD = business aggregates, safe to expose to BI tools. Each table answers a
+-- specific analytical question and is populated by the GOLD.LOAD_* procedures
+-- in sql/06_streams_tasks.sql.
 --
--- Snowflake advantage: these are normal tables, queryable instantly with
--- virtual-warehouse compute. No separate query service. The aggregates are
--- populated by the GOLD.LOAD_* stored procedures in sql/06_streams_tasks.sql.
+-- These marts are intentionally built by JOINING the Silver star schema rather
+-- than repeating city/date/time logic — that is the payoff of conformed
+-- dimensions: consistent attributes, one definition, reusable everywhere.
 -- ============================================================================
 
 USE SCHEMA AQ_WAREHOUSE.GOLD;
@@ -16,6 +17,8 @@ USE SCHEMA AQ_WAREHOUSE.GOLD;
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE TABLE GOLD.AQI_DAILY_SUMMARY (
     queried_city        STRING,
+    city_name           STRING,
+    region              STRING,
     date                DATE,
     avg_aqi             DOUBLE,
     max_aqi             DOUBLE,
@@ -38,6 +41,8 @@ COMMENT = 'Gold: daily air-quality summary per city (analytics-ready)';
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE TABLE GOLD.AQI_CITY_RANKING (
     queried_city        STRING,
+    city_name           STRING,
+    region              STRING,
     year                INT,
     month               INT,
     avg_aqi             DOUBLE,
@@ -67,6 +72,8 @@ CREATE OR REPLACE TABLE GOLD.STATION_SUMMARY (
     waqi_idx            INT,
     station_name        STRING,
     queried_city        STRING,
+    city_name           STRING,
+    region              STRING,
     lat                 DOUBLE,
     lon                 DOUBLE,
     year                INT,
@@ -86,3 +93,40 @@ CREATE OR REPLACE TABLE GOLD.STATION_SUMMARY (
 )
 CLUSTER BY (queried_city, year, month)
 COMMENT = 'Gold: monthly station summary with within-city ranking';
+
+-- ----------------------------------------------------------------------------
+-- Hour-of-day pattern (one row per city per hour-of-day) — exercises DIM_TIME
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE TABLE GOLD.AQI_HOURLY_PATTERN (
+    queried_city        STRING,
+    city_name           STRING,
+    region              STRING,
+    hour                INT,
+    time_of_day         STRING,
+    avg_aqi             DOUBLE,
+    avg_pm25            DOUBLE,
+    avg_pm10            DOUBLE,
+    record_count        INT,
+    aggregated_at       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+)
+COMMENT = 'Gold: average AQI by city and hour-of-day (time dimension demo)';
+
+-- ----------------------------------------------------------------------------
+-- Seasonal summary (one row per city per year per season) — exercises DIM_DATE
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE TABLE GOLD.AQI_SEASONAL_SUMMARY (
+    queried_city        STRING,
+    city_name           STRING,
+    region              STRING,
+    year                INT,
+    season              STRING,
+    avg_aqi             DOUBLE,
+    max_aqi             DOUBLE,
+    min_aqi             DOUBLE,
+    avg_pm25            DOUBLE,
+    avg_pm10            DOUBLE,
+    record_count        INT,
+    dominant_pollutant  STRING,
+    aggregated_at       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+)
+COMMENT = 'Gold: seasonal air-quality summary by city (date dimension demo)';

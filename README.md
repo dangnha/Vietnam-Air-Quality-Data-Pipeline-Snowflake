@@ -41,7 +41,8 @@ stored procedures**, **Time Travel**, **Zero-Copy Clone**, automatic
 |---------|-------------------|
 | Medallion architecture (Bronze → Silver → Gold) | `sql/01–05` |
 | ELT vs ETL, raw preservation via `VARIANT` | `sql/02–03`, `python/load/bronze.py` |
-| Dimensional modeling (star schema: `dim_station` + `fact_aqi`) | `sql/04` |
+| Dimensional modeling (Kimball star: 4 conformed dims + `fact_aqi`) | `sql/04`, `sql/06` |
+| Surrogate keys, degenerate dimensions, conformed date/time/city dims | `sql/04`, `sql/06` |
 | Incremental processing with **Streams + Tasks** | `sql/06` |
 | SQL stored procedures as reusable transforms | `sql/06` |
 | A native data-quality gate that blocks downstream Gold | `sql/06` `CONTROL.RUN_DQ_GATE` |
@@ -62,15 +63,17 @@ stored procedures**, **Time Travel**, **Zero-Copy Clone**, automatic
                                                            │  Streams (CDC)
                                                            ▼
                                            ┌─────────────────────────────┐
-                                           │  SILVER (star schema)       │
-                                           │  dim_station + fact_aqi     │
+                                           │  SILVER (Kimball star)      │
+                                           │  dim_date/city/station/time │
+                                           │  + fact_aqi                 │
                                            │  SQL stored procedures      │
                                            └─────────────────────────────┘
                                                            │  DQ gate (SQL proc)
                                                            ▼
                                            ┌─────────────────────────────┐
                                            │  GOLD (analytics-ready)     │
-                                           │  daily / city / station     │
+                                           │  daily/city/station/hour/   │
+                                           │  seasonal marts             │
                                            │  SQL stored procedures      │
                                            └─────────────────────────────┘
                                                            │
@@ -118,12 +121,22 @@ The warehouse is split into four schemas, one per layer plus a control schema.
 | `BRONZE.API_RAW` | one WAQI API response | full JSON kept in a `VARIANT` column |
 | `BRONZE.HISTORICAL_CSV` | one 2021 CSV record | all columns kept as `STRING` |
 
-### Silver — cleaned star schema
+### Silver — cleaned Kimball star schema
+
+The star is now a full dimensional model instead of a single `dim_station` +
+`fact_aqi` pair:
 
 | Table | Grain | Notes |
 |-------|-------|-------|
-| `SILVER.DIM_STATION` | one station per city | conformed dimension (`waqi_idx + queried_city`) |
-| `SILVER.FACT_AQI` | one measurement at one station/time | clustered by city + time |
+| `SILVER.DIM_DATE` | one calendar date | conformed calendar dimension (`date_key = YYYYMMDD`), season/quarter/weekday |
+| `SILVER.DIM_TIME` | one hour of day | conformed time-of-day dimension (`time_key = HHMM`), morning/afternoon/evening |
+| `SILVER.DIM_CITY` | one WAQI city slug | conformed city dimension with name/region/center coords |
+| `SILVER.DIM_STATION` | one station per city | conformed station dimension (surrogate key + natural `waqi_idx`) |
+| `SILVER.FACT_AQI` | one measurement at one station/time | references the four dims via surrogate keys |
+
+The fact table keeps its measurable columns and **degenerate dimensions**
+(`pollution_level`, `dominant_pollutant`, `source`) directly on the row. A
+single `SILVER.AQI_CATEGORY()` UDF is the one place that maps AQI to a category.
 
 ### Gold — analytics-ready aggregates
 
@@ -132,12 +145,15 @@ The warehouse is split into four schemas, one per layer plus a control schema.
 | `GOLD.AQI_DAILY_SUMMARY` | city + day |
 | `GOLD.AQI_CITY_RANKING` | city + month (ranked) |
 | `GOLD.STATION_SUMMARY` | station + month (ranked within city) |
+| `GOLD.AQI_HOURLY_PATTERN` | city + hour-of-day (exercises `DIM_TIME`) |
+| `GOLD.AQI_SEASONAL_SUMMARY` | city + year + season (exercises `DIM_DATE`) |
 
 ### Control — pipeline metadata
 
 | Table | Purpose |
 |-------|---------|
 | `CONTROL.CITY_MAP` | normalizes CSV city names to WAQI slugs |
+| `CONTROL.CITY_REFERENCE` | conformed city reference (slug → name, region, coords) |
 | `CONTROL.DQ_RESULTS` | audit log of quality checks |
 | `CONTROL.LOADED_FILES` | idempotency guard for the loader |
 
@@ -157,7 +173,7 @@ snowflake/
 │   ├── 01_databases_schemas.sql    # schemas + CONTROL tables + city map
 │   ├── 02_file_formats_stages.sql  # file formats + internal stage
 │   ├── 03_bronze_tables.sql        # raw VARIANT/STRING tables
-│   ├── 04_silver_tables.sql        # star schema (dim + fact)
+│   ├── 04_silver_tables.sql        # star schema (4 dims + fact)
 │   ├── 05_gold_tables.sql          # aggregate tables
 │   ├── 06_streams_tasks.sql        # native ELT: procedures + DQ + task DAG
 │   └── 07_snowflake_features_demo.sql  # Time Travel / Clone / clustering
@@ -474,12 +490,13 @@ make etl      # Silver + DQ + Gold via stored procedures
 ### Verify the result
 
 ```sql
-SELECT queried_city, COUNT(*) AS rows
+SELECT queried_city, city_name, region, COUNT(*) AS rows
 FROM AQ_WAREHOUSE.GOLD.AQI_CITY_RANKING
-GROUP BY 1;
+GROUP BY 1, 2, 3;
 ```
 
-You should see all 5 cities with populated rankings.
+You should see all 5 cities with populated rankings and their enriched
+attributes (`city_name`, `region`) flowing from `SILVER.DIM_CITY`.
 
 ---
 
@@ -510,16 +527,17 @@ to be in the same schema.
 
 ## Data quality gate
 
-`CONTROL.RUN_DQ_GATE()` runs six checks against `SILVER.FACT_AQI`:
+`CONTROL.RUN_DQ_GATE()` runs seven checks against the Silver star schema:
 
 | Check | Description |
 |-------|-------------|
 | `row_count` | enough rows (min 10) |
-| `null_pct` | critical columns under 5% null |
+| `null_pct` | critical columns + surrogate keys under 5% null |
 | `aqi_range` | AQI within [0, 500] |
-| `city_coverage` | all 5 cities present |
+| `city_coverage` | all reference cities present in the fact |
 | `source_validity` | only `kaggle` / `api` |
 | `freshness` | at least one row ingested within 48h |
+| `fk_integrity` | every fact resolves to all four dimensions |
 
 Each check writes a row to `CONTROL.DQ_RESULTS`. If any fail, the procedure
 `RAISE`s — which fails `CONTROL.RUN_DQ_TASK` and prevents `CONTROL.LOAD_GOLD_TASK`
@@ -533,6 +551,7 @@ pipeline" SNS behavior.
 Run `sql/07_snowflake_features_demo.sql` interactively in Snowsight to explore:
 
 - **`VARIANT` + `FLATTEN`** — query raw JSON with SQL, no crawler
+- **Star schema join** — slice `FACT_AQI` by city/season/time-of-day in one query
 - **Time Travel** — rewind a table with `AT (OFFSET => -60*60)`
 - **Zero-Copy Clone** — instant dev copy with `CLONE`
 - **Micro-partitions** — inspect `SYSTEM$CLUSTERING_INFORMATION`

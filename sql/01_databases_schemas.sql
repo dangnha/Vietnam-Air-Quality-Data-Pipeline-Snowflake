@@ -54,6 +54,27 @@ INSERT OVERWRITE INTO CONTROL.CITY_MAP VALUES
     ('Gia Lai',          'gia-lai'),
     ('Cao Bang',         'cao-bang');
 
+-- Conformed city reference: the WAQI slug is the natural key, enriched with the
+-- display name, Vietnam region, and city-center coordinates. DIM_CITY is built
+-- from this reference, so the dimension carries business attributes the raw
+-- payload does not contain.
+CREATE OR REPLACE TABLE CONTROL.CITY_REFERENCE (
+    city_slug  STRING NOT NULL,
+    city_name  STRING NOT NULL,
+    region     STRING NOT NULL,
+    lat        DOUBLE,
+    lon        DOUBLE,
+    PRIMARY KEY (city_slug) NOT ENFORCED
+)
+COMMENT = 'Conformed city reference: WAQI slug -> name, region, center coords';
+
+INSERT OVERWRITE INTO CONTROL.CITY_REFERENCE VALUES
+    ('ha-noi',           'Ha Noi',           'North',             21.0285, 105.8542),
+    ('ho-chi-minh-city', 'Ho Chi Minh City', 'South',             10.8231, 106.6297),
+    ('da-nang',          'Da Nang',          'Central',           16.0544, 108.2022),
+    ('gia-lai',          'Gia Lai',          'Central Highlands', 13.9718, 108.0151),
+    ('cao-bang',         'Cao Bang',         'North',             22.6657, 106.2579);
+
 -- One row per quality check per run. Populated by CONTROL.RUN_DQ_GATE().
 CREATE OR REPLACE TABLE CONTROL.DQ_RESULTS (
     run_id        STRING,
